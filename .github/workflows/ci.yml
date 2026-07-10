@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go: ["1.20", "1.22", "1.23"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+
+      - name: Format check
+        run: |
+          # gofmt -l 报告未格式化文件即失败
+          if [ -n "$(gofmt -l .)" ]; then
+            echo "gofmt 发现未格式化的文件："
+            gofmt -l .
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Build Windows binary
+        run: GOOS=windows GOARCH=amd64 go build -o /tmp/ClaudeContext.exe .

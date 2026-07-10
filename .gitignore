@@ -1,0 +1,37 @@
+# 编译产物（不提交二进制）
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+ClaudeContext
+ClaudeContext.exe
+
+# 测试 / 覆盖率 / 基准
+*.out
+*.test
+*.prof
+coverage.txt
+
+# 依赖目录
+vendor/
+
+# CLI 运行时生成的输出
+claude-context.csv
+
+# 编辑器 / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# 本地 Claude Code 工作区数据
+.claude/
+
+#不提交设计文档
+docs/*
