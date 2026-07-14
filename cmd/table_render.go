@@ -31,10 +31,11 @@ func renderSessionTable(cfg *Config, sessions []*model.SessionStats, title strin
 	if cfg.Limit > 0 && len(rows) > cfg.Limit {
 		rows = rows[:cfg.Limit]
 	}
+	names := report.ComputeProjectDisplayNames(sessions)
 	for _, s := range rows {
 		status, _ := ui.StatusLabel(s.Used())
 		tbl.Rows = append(tbl.Rows, []string{
-			s.Project,
+			report.DisplayName(names, s),
 			ui.ShortID(s.SessionID, 8),
 			ui.FormatSize(s.FileSize),
 			ui.FormatTokensFull(s.Tokens),

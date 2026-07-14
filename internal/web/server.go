@@ -160,6 +160,8 @@ type sessionDTO struct {
 	ToolUse         int          `json:"tool_use"`
 	ToolResult      int          `json:"tool_result"`
 	ModTime         string       `json:"mod_time"`
+	StartTime       string       `json:"start_time"`
+	StartTimeH      string       `json:"start_time_h"`
 	TopMessages     []messageDTO `json:"top_messages,omitempty"`
 	SidechainTokens int64        `json:"sidechain_tokens,omitempty"`
 }
@@ -216,9 +218,10 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	if limit > 0 && limit < len(sorted) {
 		out = sorted[:limit]
 	}
+	names := report.ComputeProjectDisplayNames(res.Sessions)
 	dtos := make([]sessionDTO, 0, len(out))
 	for _, st := range out {
-		dtos = append(dtos, toSessionDTO(st, mc))
+		dtos = append(dtos, toSessionDTO(st, mc, report.DisplayName(names, st)))
 	}
 	writeJSON(w, dtos)
 }
@@ -255,7 +258,8 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
-	dto := toSessionDTO(st, mc)
+	names := report.ComputeProjectDisplayNames(res.Sessions)
+	dto := toSessionDTO(st, mc, report.DisplayName(names, st))
 	dto.TopMessages = make([]messageDTO, 0, len(st.TopMessages))
 	for _, m := range st.TopMessages {
 		dto.TopMessages = append(dto.TopMessages, messageDTO{Kind: m.Kind, Tokens: m.Tokens, Preview: m.Preview})
@@ -273,7 +277,7 @@ func usedPct(tokens, maxContext int64) float64 {
 	return float64(tokens) / float64(maxContext) * 100
 }
 
-func toSessionDTO(st *model.SessionStats, maxContext int64) sessionDTO {
+func toSessionDTO(st *model.SessionStats, maxContext int64, projectName string) sessionDTO {
 	u := usedPct(st.Tokens, maxContext)
 	lvl := ui.LevelFor(u)
 	status, _ := ui.StatusLabel(u)
@@ -281,12 +285,19 @@ func toSessionDTO(st *model.SessionStats, maxContext int64) sessionDTO {
 	if !st.ModTime.IsZero() {
 		mt = st.ModTime.Format(time.RFC3339)
 	}
+	stt := ""
+	if !st.StartTime.IsZero() {
+		stt = st.StartTime.Format(time.RFC3339)
+	}
+	if projectName == "" {
+		projectName = st.Project
+	}
 	remaining := maxContext - st.Tokens
 	if remaining < 0 {
 		remaining = 0
 	}
 	return sessionDTO{
-		Project:      st.Project,
+		Project:      projectName,
 		SessionID:    st.SessionID,
 		ShortID:      ui.ShortID(st.SessionID, 8),
 		Cwd:          st.Cwd,
@@ -304,6 +315,8 @@ func toSessionDTO(st *model.SessionStats, maxContext int64) sessionDTO {
 		ToolUse:      st.ToolUseCount,
 		ToolResult:   st.ToolResultCount,
 		ModTime:      mt,
+		StartTime:    stt,
+		StartTimeH:   ui.FormatTime(st.StartTime),
 	}
 }
 

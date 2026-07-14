@@ -57,6 +57,10 @@
   .pill.orange { background: rgba(249,115,22,.15); color: var(--orange); }
   .pill.red { background: rgba(239,68,68,.18); color: var(--red); }
   .pill.burst { background: var(--red); color: #fff; }
+  .pname { font-weight: 600; }
+  .ppath { font-size: 11px; color: var(--muted); max-width: 240px; overflow: hidden;
+           text-overflow: ellipsis; white-space: nowrap; }
+  .small { font-size: 12px; }
   .muted { color: var(--muted); }
   .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6);
                    z-index: 50; justify-content: center; align-items: flex-start; padding: 40px 16px; }
@@ -101,8 +105,8 @@
     <div class="tbl-wrap">
       <table id="sessTbl">
         <thead><tr>
-          <th>Project</th><th>Session</th><th class="num">Size</th><th class="num">Tokens</th>
-          <th>Used</th><th class="num">Remaining</th><th>Status</th>
+          <th>Project</th><th>Session</th><th>开始时间</th><th class="num">Size</th>
+          <th class="num">Tokens</th><th>Used</th><th class="num">Remaining</th><th>Status</th>
         </tr></thead>
         <tbody id="sessBody"></tbody>
       </table>
@@ -176,8 +180,9 @@ function renderSessions(rows) {
     const bar = `<span class="bar"><span style="width:${w}%;background:${BAR_COLOR[s.level]}"></span></span>`;
     const pct = s.used_pct.toFixed(1) + '%';
     return `<tr class="row ${s.level==='burst'?'burst':''}" onclick="openDetail('${s.session_id}')">
-      <td>${esc(s.project)}</td>
+      <td><div class="pname">${esc(s.project)}</div><div class="ppath" title="${esc(s.cwd||'')}">${esc(s.cwd||'—')}</div></td>
       <td><span class="muted">${esc(s.short_id)}</span></td>
+      <td class="muted small">${esc(s.start_time_h||'—')}</td>
       <td class="num">${esc(s.file_size_h)}</td>
       <td class="num">${s.tokens.toLocaleString()}</td>
       <td>${bar}${pct}</td>
@@ -265,7 +270,8 @@ async function openDetail(id) {
     ['Attachments', d.attachments], ['Tool Use / Result', d.tool_use + ' / ' + d.tool_result],
     ['Tokens', d.tokens.toLocaleString()],
     ['Used', d.used_pct.toFixed(1) + '%'], ['Remaining', d.remaining.toLocaleString()],
-    ['Mod Time', d.mod_time ? new Date(d.mod_time).toLocaleString() : '-'],
+    ['Started', d.start_time ? new Date(d.start_time).toLocaleString() : '-'],
+    ['Last Active', d.mod_time ? new Date(d.mod_time).toLocaleString() : '-'],
   ];
   if (d.sidechain_tokens) rows.push(['Sidechain (excl.)', d.sidechain_tokens.toLocaleString()]);
   $('mGrid').innerHTML = rows.map(([k,v]) => `<div class="k">${k}</div><div>${esc(v)}</div>`).join('');

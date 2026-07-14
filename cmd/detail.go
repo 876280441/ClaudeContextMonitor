@@ -27,12 +27,13 @@ func RunDetail(cfg *Config, args []string) error {
 	w := cfg.out()
 	lvl := ui.LevelFor(s.Used())
 	status, _ := ui.StatusLabel(s.Used())
+	names := report.ComputeProjectDisplayNames(res.Sessions)
 
 	fmt.Fprintln(w, ui.Cyan("Claude Context Monitor — Session Detail"))
 	fmt.Fprintln(w, ui.Divider(0))
 
 	kv := [][2]string{
-		{"Project", s.Project},
+		{"Project", report.DisplayName(names, s)},
 		{"Session", s.SessionID},
 		{"Path", s.Cwd},
 		{"File Size", ui.FormatSize(s.FileSize)},
@@ -45,6 +46,8 @@ func RunDetail(cfg *Config, args []string) error {
 		{"Estimated Tokens", ui.FormatTokensFull(s.Tokens)},
 		{"Used", ui.Color(ui.FormatPercent(s.Used())+" ["+status+"]", lvl)},
 		{"Remaining", ui.FormatTokensFull(s.Remaining())},
+		{"Started", ui.FormatTime(s.StartTime)},
+		{"Last Active", ui.FormatTime(s.ModTime)},
 	}
 	if !exact {
 		fmt.Fprintln(w, ui.Dim(fmt.Sprintf("(matched by prefix: %s)", s.SessionID)))

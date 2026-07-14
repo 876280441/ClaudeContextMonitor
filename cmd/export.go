@@ -47,18 +47,23 @@ func RunExport(cfg *Config, args []string) error {
 		"Project", "SessionID", "Path", "FileSize", "Messages",
 		"UserMsg", "AssistantMsg", "Attachments", "ToolUse", "ToolResult",
 		"Tokens", "UsedPct", "Remaining", "MaxContext",
-		"ModTime", "ParseErrors",
+		"StartTime", "ModTime", "ParseErrors",
 	}
 	if err := w.Write(header); err != nil {
 		return err
 	}
+	names := report.ComputeProjectDisplayNames(sorted)
 	for _, s := range sorted {
+		st := ""
+		if !s.StartTime.IsZero() {
+			st = s.StartTime.Format(time.RFC3339)
+		}
 		mt := ""
 		if !s.ModTime.IsZero() {
 			mt = s.ModTime.Format(time.RFC3339)
 		}
 		row := []string{
-			s.Project,
+			report.DisplayName(names, s),
 			s.SessionID,
 			s.Cwd,
 			strconv.FormatInt(s.FileSize, 10),
@@ -72,6 +77,7 @@ func RunExport(cfg *Config, args []string) error {
 			fmt.Sprintf("%.2f", s.Used()),
 			strconv.FormatInt(s.Remaining(), 10),
 			strconv.FormatInt(cfg.MaxContext, 10),
+			st,
 			mt,
 			strconv.Itoa(s.ParseErrors),
 		}

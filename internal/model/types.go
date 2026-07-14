@@ -31,9 +31,10 @@ type SessionStats struct {
 	Cwd       string // 记录中读取到的 cwd（取最后一条非空）
 
 	// 文件信息
-	FilePath string
-	FileSize int64
-	ModTime  time.Time // 文件最后修改时间
+	FilePath  string
+	FileSize  int64
+	ModTime   time.Time // 文件最后修改时间
+	StartTime time.Time // 会话开始时间（首条记录的 timestamp）
 
 	// 消息计数
 	UserMsgCount      int

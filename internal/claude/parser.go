@@ -7,6 +7,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/USER/claude-context-monitor/internal/model"
 	"github.com/USER/claude-context-monitor/internal/tokenizer"
@@ -110,6 +111,13 @@ func processLine(stats *model.SessionStats, line []byte, tok tokenizer.Tokenizer
 		stats.Cwd = e.Cwd
 		if name := ProjectNameFromCwd(e.Cwd); name != "" {
 			stats.Project = name
+		}
+	}
+
+	// 开始时间：取首条非空 timestamp（文件按时间顺序追加，首条即会话开始）。
+	if stats.StartTime.IsZero() && e.Timestamp != "" {
+		if t, err := time.Parse(time.RFC3339, e.Timestamp); err == nil {
+			stats.StartTime = t
 		}
 	}
 

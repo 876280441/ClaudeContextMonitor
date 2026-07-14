@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // FormatTokens 将 Token 数格式化为紧凑形式：>=1e6 用 M、>=1e3 用 K。
@@ -115,4 +116,17 @@ func Divider(width int) string {
 		width = 60
 	}
 	return strings.Repeat("-", width)
+}
+
+// FormatTime 将时间格式化为紧凑显示：零值返回 "-"；当年显示 "MM-DD HH:MM"，
+// 跨年显示 "YYYY-MM-DD"。用于会话开始/更新时间列。
+func FormatTime(t time.Time) string {
+	if t.IsZero() {
+		return "-"
+	}
+	now := time.Now()
+	if t.Year() == now.Year() {
+		return t.Format("01-02 15:04")
+	}
+	return t.Format("2006-01-02")
 }
