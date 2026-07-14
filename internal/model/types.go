@@ -23,6 +23,26 @@ type MessageStat struct {
 	Preview string // 内容预览（前若干字符，用于定位）
 }
 
+// GlobalMessageStat 是跨会话聚合的单条大消息，附带来源（项目/会话）。
+type GlobalMessageStat struct {
+	Project   string
+	SessionID string
+	Kind      string
+	Tokens    int64
+	Preview   string
+}
+
+// UsageInfo 记录来自 Anthropic 的真实 token 计数（assistant 消息的 usage 字段）。
+// ContextTokens = InputTokens + CacheCreation + CacheRead，即该轮的真实上下文大小。
+type UsageInfo struct {
+	HasReal       bool
+	ContextTokens int64 // input + cache_creation + cache_read（真实当前上下文）
+	InputTokens   int64 // 本轮新增（未命中缓存）输入 token
+	CacheRead     int64 // 命中缓存的输入 token
+	CacheCreation int64 // 写入缓存的输入 token
+	OutputTokens  int64 // 该轮输出 token
+}
+
 // SessionStats 是单个 Session（一个 jsonl 文件）解析后的统计结果。
 type SessionStats struct {
 	// 标识
@@ -45,30 +65,45 @@ type SessionStats struct {
 	ParseErrors       int // 解析失败行数（容错统计）
 
 	// Token 与 Context
-	Tokens          int64 // 估算总 Token（主上下文）
-	MaxContext      int64 // Context 上限，来自 --max-context
-	SidechainTokens int64 // 被排除的 sidechain Token（参考）
+	Tokens          int64     // 估算内容 Token（仅 content 累加，参考）
+	MaxContext      int64     // Context 上限，来自 --max-context
+	SidechainTokens int64     // 被排除的 sidechain Token（参考）
+	LastUsage       UsageInfo // 真实 token（来自末条 assistant 的 usage；无则用估算）
+
+	// 增速采样（近期 assistant 的 时间点+真实上下文 Token），用于预计填满时间
+	Samples []SamplePoint
 
 	// Top-N 最大消息（按 Token 降序，最多 TopN 条）
 	TopMessages []MessageStat
 }
 
-// Used 返回上下文使用百分比（0-100+）。
+// Used 返回上下文使用百分比（0-100+）。优先用真实 usage，无则回退估算。
 func (s *SessionStats) Used() float64 {
 	if s.MaxContext <= 0 {
 		return 0
 	}
-	return float64(s.Tokens) / float64(s.MaxContext) * 100
+	return float64(s.ContextTokens()) / float64(s.MaxContext) * 100
 }
 
-// Remaining 返回剩余 Token。
+// Remaining 返回剩余 Token（基于真实 usage，无则估算）。
 func (s *SessionStats) Remaining() int64 {
-	r := s.MaxContext - s.Tokens
+	r := s.MaxContext - s.ContextTokens()
 	if r < 0 {
 		return 0
 	}
 	return r
 }
+
+// ContextTokens 返回当前上下文 Token 数：有真实 usage 用真实值，否则回退估算。
+func (s *SessionStats) ContextTokens() int64 {
+	if s.LastUsage.HasReal {
+		return s.LastUsage.ContextTokens
+	}
+	return s.Tokens
+}
+
+// HasRealTokens 是否拿到了 Anthropic 真实 token 计数。
+func (s *SessionStats) HasRealTokens() bool { return s.LastUsage.HasReal }
 
 // TotalMessages 返回 user + assistant 消息总数。
 func (s *SessionStats) TotalMessages() int {
@@ -94,3 +129,17 @@ type ProjectStats struct {
 
 // TopN 是默认维护的最大消息数量上限。
 const TopN = 10
+
+// ActiveThreshold 判定会话"活跃"的时间窗口（距最后修改）。
+const ActiveThreshold = 10 * time.Minute
+
+// SamplePoint 是一个 (时间点, 真实上下文 Token) 采样，用于估算增速与预计填满时间。
+type SamplePoint struct {
+	At     time.Time
+	Tokens int64
+}
+
+// IsActive 判断该会话是否在近期（ActiveThreshold 内）有活动。
+func (s *SessionStats) IsActive() bool {
+	return !s.ModTime.IsZero() && time.Since(s.ModTime) < ActiveThreshold
+}

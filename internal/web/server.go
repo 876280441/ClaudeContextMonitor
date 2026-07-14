@@ -8,12 +8,15 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
 	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/USER/claude-context-monitor/internal/claude"
@@ -106,6 +109,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/overview", s.handleOverview)
 	mux.HandleFunc("/api/sessions", s.handleSessions)
 	mux.HandleFunc("/api/projects", s.handleProjects)
+	mux.HandleFunc("/api/messages", s.handleMessages)
 	mux.HandleFunc("/api/session/", s.handleSessionDetail) // 注意末尾斜杠：前缀匹配
 	return mux
 }
@@ -130,6 +134,7 @@ type overviewDTO struct {
 	TotalTokensH  string `json:"total_tokens_h"`
 	Over90        int    `json:"over_90"`
 	Over95        int    `json:"over_95"`
+	ActiveCount   int    `json:"active_count"`
 	MaxContext    int64  `json:"max_context"`
 	ParseErrors   int    `json:"parse_errors"`
 	GeneratedAt   string `json:"generated_at"`
@@ -149,6 +154,10 @@ type sessionDTO struct {
 	FileSize        int64        `json:"file_size"`
 	FileSizeH       string       `json:"file_size_h"`
 	Tokens          int64        `json:"tokens"`
+	TokensSource    string       `json:"tokens_source"` // "real" | "estimate"
+	InputTokens     int64        `json:"input_tokens,omitempty"`
+	CacheRead       int64        `json:"cache_read,omitempty"`
+	CacheCreation   int64        `json:"cache_creation,omitempty"`
 	UsedPct         float64      `json:"used_pct"`
 	Remaining       int64        `json:"remaining"`
 	Status          string       `json:"status"`
@@ -162,6 +171,8 @@ type sessionDTO struct {
 	ModTime         string       `json:"mod_time"`
 	StartTime       string       `json:"start_time"`
 	StartTimeH      string       `json:"start_time_h"`
+	Active          bool         `json:"active"`
+	Eta             string       `json:"eta,omitempty"`
 	TopMessages     []messageDTO `json:"top_messages,omitempty"`
 	SidechainTokens int64        `json:"sidechain_tokens,omitempty"`
 }
@@ -176,20 +187,32 @@ type projectDTO struct {
 	LargestTokensH string `json:"largest_tokens_h"`
 }
 
+type globalMessageDTO struct {
+	Project   string `json:"project"`
+	SessionID string `json:"session_id"`
+	ShortID   string `json:"short_id"`
+	Kind      string `json:"kind"`
+	Tokens    int64  `json:"tokens"`
+	Preview   string `json:"preview"`
+}
+
 // ---- handlers ----
 
 func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 	mc, isc := s.params(r)
 	res := s.scan(mc, isc)
-	var over90, over95 int
+	var over90, over95, active int
 	for _, st := range res.Sessions {
-		u := usedPct(st.Tokens, mc)
+		u := usedPct(st.ContextTokens(), mc)
 		lvl := ui.LevelFor(u)
 		if lvl >= ui.LevelOrange {
 			over90++
 		}
 		if lvl >= ui.LevelRed {
 			over95++
+		}
+		if st.IsActive() {
+			active++
 		}
 	}
 	writeJSON(w, overviewDTO{
@@ -198,6 +221,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		TotalTokensH:  ui.FormatTokens(report.TotalTokens(res.Sessions)),
 		Over90:        over90,
 		Over95:        over95,
+		ActiveCount:   active,
 		MaxContext:    mc,
 		ParseErrors:   res.ParseErrors,
 		GeneratedAt:   time.Now().Format(time.RFC3339),
@@ -245,6 +269,30 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, dtos)
 }
 
+func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
+	mc, isc := s.params(r)
+	res := s.scan(mc, isc)
+	limit := 20
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	msgs := report.GlobalTopMessages(res.Sessions, limit)
+	dtos := make([]globalMessageDTO, 0, len(msgs))
+	for _, m := range msgs {
+		dtos = append(dtos, globalMessageDTO{
+			Project:   m.Project,
+			SessionID: m.SessionID,
+			ShortID:   ui.ShortID(m.SessionID, 8),
+			Kind:      m.Kind,
+			Tokens:    m.Tokens,
+			Preview:   m.Preview,
+		})
+	}
+	writeJSON(w, dtos)
+}
+
 func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 	mc, isc := s.params(r)
 	id := strings.TrimPrefix(r.URL.Path, "/api/session/")
@@ -278,7 +326,7 @@ func usedPct(tokens, maxContext int64) float64 {
 }
 
 func toSessionDTO(st *model.SessionStats, maxContext int64, projectName string) sessionDTO {
-	u := usedPct(st.Tokens, maxContext)
+	u := usedPct(st.ContextTokens(), maxContext)
 	lvl := ui.LevelFor(u)
 	status, _ := ui.StatusLabel(u)
 	mt := ""
@@ -292,18 +340,23 @@ func toSessionDTO(st *model.SessionStats, maxContext int64, projectName string) 
 	if projectName == "" {
 		projectName = st.Project
 	}
-	remaining := maxContext - st.Tokens
+	remaining := maxContext - st.ContextTokens()
 	if remaining < 0 {
 		remaining = 0
 	}
-	return sessionDTO{
+	src := "estimate"
+	if st.HasRealTokens() {
+		src = "real"
+	}
+	dto := sessionDTO{
 		Project:      projectName,
 		SessionID:    st.SessionID,
 		ShortID:      ui.ShortID(st.SessionID, 8),
 		Cwd:          st.Cwd,
 		FileSize:     st.FileSize,
 		FileSizeH:    ui.FormatSize(st.FileSize),
-		Tokens:       st.Tokens,
+		Tokens:       st.ContextTokens(),
+		TokensSource: src,
 		UsedPct:      u,
 		Remaining:    remaining,
 		Status:       status,
@@ -318,6 +371,16 @@ func toSessionDTO(st *model.SessionStats, maxContext int64, projectName string) 
 		StartTime:    stt,
 		StartTimeH:   ui.FormatTime(st.StartTime),
 	}
+	if st.HasRealTokens() {
+		dto.InputTokens = st.LastUsage.InputTokens
+		dto.CacheRead = st.LastUsage.CacheRead
+		dto.CacheCreation = st.LastUsage.CacheCreation
+	}
+	dto.Active = st.IsActive()
+	if _, eta, ok := report.EstimateFill(st, maxContext); ok {
+		dto.Eta = ui.FormatDuration(eta)
+	}
+	return dto
 }
 
 func levelStr(l ui.Level) string {
@@ -369,4 +432,46 @@ func ListenAddr(arg string) string {
 		a = "127.0.0.1:" + a
 	}
 	return a
+}
+
+// AcquireListener 尝试在 addr 监听；若端口被占用则端口 +1 自动重试，最多 maxTries 次。
+// 返回成功获取的 Listener 与实际监听地址。
+func AcquireListener(addr string, maxTries int) (net.Listener, string, error) {
+	if maxTries < 1 {
+		maxTries = 1
+	}
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		ln, lerr := net.Listen("tcp", addr)
+		return ln, addr, lerr
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		ln, lerr := net.Listen("tcp", addr)
+		return ln, addr, lerr
+	}
+	var lastErr error
+	for i := 0; i < maxTries; i++ {
+		try := net.JoinHostPort(host, strconv.Itoa(port+i))
+		ln, lerr := net.Listen("tcp", try)
+		if lerr == nil {
+			return ln, try, nil
+		}
+		lastErr = lerr
+		if !isAddrInUse(lerr) {
+			// 非端口占用错误（如权限不足），直接返回
+			return nil, "", lerr
+		}
+	}
+	return nil, "", errors.New("no free port near " + addr + " after retries: " + lastErr.Error())
+}
+
+// isAddrInUse 判断是否为"地址/端口已被占用"错误（跨平台兼容）。
+func isAddrInUse(err error) bool {
+	if errors.Is(err, syscall.EADDRINUSE) {
+		return true
+	}
+	s := err.Error()
+	return strings.Contains(s, "address already in use") ||
+		strings.Contains(s, "Only one usage of each socket address")
 }

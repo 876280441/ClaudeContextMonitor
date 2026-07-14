@@ -130,3 +130,19 @@ func FormatTime(t time.Time) string {
 	}
 	return t.Format("2006-01-02")
 }
+
+// FormatDuration 将时长格式化为人类可读（约 N 分钟 / 小时 / 天）。
+func FormatDuration(d time.Duration) string {
+	if d <= 0 {
+		return "-"
+	}
+	h := d.Hours()
+	switch {
+	case h < 1:
+		return fmt.Sprintf("约 %d 分钟", int(d.Minutes()))
+	case h < 48:
+		return fmt.Sprintf("约 %.1f 小时", h)
+	default:
+		return fmt.Sprintf("约 %.1f 天", h/24)
+	}
+}

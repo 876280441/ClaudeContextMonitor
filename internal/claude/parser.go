@@ -34,6 +34,15 @@ type rawEntry struct {
 type rawMessage struct {
 	Role    string          `json:"role"`
 	Content json.RawMessage `json:"content"`
+	Usage   *rawUsage       `json:"usage"`
+}
+
+// rawUsage 对应 assistant 消息的 usage 字段（Anthropic 真实 token 计数）。
+type rawUsage struct {
+	InputTokens              int64 `json:"input_tokens"`
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
+	OutputTokens             int64 `json:"output_tokens"`
 }
 
 // contentBlock 描述 message.content 数组中的一个块（text/thinking/tool_use/tool_result）。
@@ -138,6 +147,25 @@ func processLine(stats *model.SessionStats, line []byte, tok tokenizer.Tokenizer
 		t := extractTokens(&e, tok, stats, true) + int64(tokenizer.PerMessageOverhead)
 		stats.Tokens += t
 		addTopMessage(stats, "assistant", t, previewOf(&e))
+		// 记录末条 assistant 的真实 usage（覆盖式，最终即最新一轮的上下文）。
+		if e.Message != nil && e.Message.Usage != nil {
+			u := e.Message.Usage
+			stats.LastUsage = model.UsageInfo{
+				HasReal:       true,
+				InputTokens:   u.InputTokens,
+				CacheRead:     u.CacheReadInputTokens,
+				CacheCreation: u.CacheCreationInputTokens,
+				OutputTokens:  u.OutputTokens,
+				ContextTokens: u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens,
+			}
+			// 采样（时间点, 真实上下文），用于增速与预计填满；保留最近 16 个。
+			if t, err := time.Parse(time.RFC3339, e.Timestamp); err == nil {
+				stats.Samples = append(stats.Samples, model.SamplePoint{At: t, Tokens: stats.LastUsage.ContextTokens})
+				if len(stats.Samples) > 16 {
+					stats.Samples = stats.Samples[len(stats.Samples)-16:]
+				}
+			}
+		}
 	case "attachment":
 		stats.AttachmentCount++
 		stats.Tokens += extractTokens(&e, tok, stats, true)

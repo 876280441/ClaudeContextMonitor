@@ -21,6 +21,7 @@ func RunTop(cfg *Config, args []string) error {
 		return err
 	}
 	top := report.Top(res.Sessions, n)
-	renderSessionTable(cfg, top, fmt.Sprintf("Top %d sessions by tokens", n))
+	names := report.ComputeProjectDisplayNames(res.Sessions)
+	renderSessionTable(cfg, top, names, fmt.Sprintf("Top %d sessions by tokens", n))
 	return nil
 }

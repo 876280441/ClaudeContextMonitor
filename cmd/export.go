@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/USER/claude-context-monitor/internal/model"
 	"github.com/USER/claude-context-monitor/internal/report"
 )
 
@@ -46,7 +47,7 @@ func RunExport(cfg *Config, args []string) error {
 	header := []string{
 		"Project", "SessionID", "Path", "FileSize", "Messages",
 		"UserMsg", "AssistantMsg", "Attachments", "ToolUse", "ToolResult",
-		"Tokens", "UsedPct", "Remaining", "MaxContext",
+		"Tokens", "TokensSource", "UsedPct", "Remaining", "MaxContext",
 		"StartTime", "ModTime", "ParseErrors",
 	}
 	if err := w.Write(header); err != nil {
@@ -73,7 +74,8 @@ func RunExport(cfg *Config, args []string) error {
 			strconv.Itoa(s.AttachmentCount),
 			strconv.Itoa(s.ToolUseCount),
 			strconv.Itoa(s.ToolResultCount),
-			strconv.FormatInt(s.Tokens, 10),
+			strconv.FormatInt(s.ContextTokens(), 10),
+			tokensSource(s),
 			fmt.Sprintf("%.2f", s.Used()),
 			strconv.FormatInt(s.Remaining(), 10),
 			strconv.FormatInt(cfg.MaxContext, 10),
@@ -91,4 +93,11 @@ func RunExport(cfg *Config, args []string) error {
 	}
 	fmt.Fprintf(cfg.out(), "Exported %d sessions to %s\n", len(sorted), filename)
 	return nil
+}
+
+func tokensSource(s *model.SessionStats) string {
+	if s.HasRealTokens() {
+		return "real"
+	}
+	return "estimate"
 }

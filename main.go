@@ -13,6 +13,7 @@
 //	export csv [file]  导出 CSV（默认 claude-context.csv）
 //	watch [interval]   实时刷新（默认 3s）
 //	serve [addr]       启动 Web 仪表盘（默认 127.0.0.1:8765）
+//	messages [N]       全局最大的前 N 条消息（默认 20）
 //
 // 全局选项：
 //
@@ -75,14 +76,15 @@ func main() {
 
 func commands() map[string]func(*cmd.Config, []string) error {
 	return map[string]func(*cmd.Config, []string) error{
-		"":        cmd.RunList,
-		"list":    cmd.RunList,
-		"top":     cmd.RunTop,
-		"detail":  cmd.RunDetail,
-		"project": cmd.RunProject,
-		"export":  cmd.RunExport,
-		"watch":   cmd.RunWatch,
-		"serve":   cmd.RunServe,
+		"":         cmd.RunList,
+		"list":     cmd.RunList,
+		"top":      cmd.RunTop,
+		"detail":   cmd.RunDetail,
+		"project":  cmd.RunProject,
+		"export":   cmd.RunExport,
+		"watch":    cmd.RunWatch,
+		"serve":    cmd.RunServe,
+		"messages": cmd.RunMessages,
 		"help": func(cfg *cmd.Config, _ []string) error {
 			printUsage(cfg.Out)
 			return nil
@@ -196,6 +198,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  export csv [file]     Export sessions to CSV")
 	fmt.Fprintln(w, "  watch [interval]      Live refresh (e.g. 3s)")
 	fmt.Fprintln(w, "  serve [addr]          Start web dashboard (default 127.0.0.1:8765)")
+	fmt.Fprintln(w, "  messages [N]          Top N largest messages across all sessions")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Options:")
 	fmt.Fprintln(w, "  --max-context N       Context limit (default 1000000)")

@@ -9,6 +9,7 @@ import (
 
 // RunServe 启动 Web 仪表盘服务。
 // 用法：serve [addr]（addr 为端口号或 host:port，默认 127.0.0.1:8765）
+// 若端口被占用，自动 +1 避让，最多尝试 20 个端口。
 func RunServe(cfg *Config, args []string) error {
 	addr := ""
 	if len(args) > 0 {
@@ -16,9 +17,17 @@ func RunServe(cfg *Config, args []string) error {
 	}
 	listen := web.ListenAddr(addr)
 	srv := web.NewServer(cfg.ClaudeDir, cfg.MaxContext, cfg.IncludeSidechain)
-	url := "http://" + listen + "/"
+
+	ln, used, err := web.AcquireListener(listen, 20)
+	if err != nil {
+		return err
+	}
+	url := "http://" + used + "/"
 
 	fmt.Fprintf(cfg.out(), "Claude Context Monitor — Web Dashboard\n")
+	if used != listen {
+		fmt.Fprintf(cfg.out(), "  %s 被占用，自动改用 %s\n", listen, used)
+	}
 	fmt.Fprintf(cfg.out(), "  listening: %s\n", url)
 	fmt.Fprintf(cfg.out(), "  data dir : %s\n", cfg.ClaudeDir)
 	fmt.Fprintf(cfg.out(), "  max ctx  : %s   (include-sidechain: %v)\n",
@@ -30,7 +39,7 @@ func RunServe(cfg *Config, args []string) error {
 		fmt.Fprintf(cfg.out(), "  (could not auto-open browser, open the URL manually)\n")
 	}
 
-	return http.ListenAndServe(listen, srv.Handler())
+	return http.Serve(ln, srv.Handler())
 }
 
 func fmtInt(n int64) string {

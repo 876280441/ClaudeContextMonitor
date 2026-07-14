@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/USER/claude-context-monitor/internal/model"
 	"github.com/USER/claude-context-monitor/internal/report"
 	"github.com/USER/claude-context-monitor/internal/ui"
 )
@@ -44,10 +45,12 @@ func RunDetail(cfg *Config, args []string) error {
 		{"Tool Use", fmt.Sprintf("%d", s.ToolUseCount)},
 		{"Tool Result", fmt.Sprintf("%d", s.ToolResultCount)},
 		{"Estimated Tokens", ui.FormatTokensFull(s.Tokens)},
+		{"Context", contextLine(s)},
 		{"Used", ui.Color(ui.FormatPercent(s.Used())+" ["+status+"]", lvl)},
 		{"Remaining", ui.FormatTokensFull(s.Remaining())},
+		{"ETA to Full", etaLine(s, cfg.MaxContext)},
 		{"Started", ui.FormatTime(s.StartTime)},
-		{"Last Active", ui.FormatTime(s.ModTime)},
+		{"Last Active", ui.FormatTime(s.ModTime) + activeTag(s)},
 	}
 	if !exact {
 		fmt.Fprintln(w, ui.Dim(fmt.Sprintf("(matched by prefix: %s)", s.SessionID)))
@@ -98,4 +101,34 @@ func printKV(w io.Writer, kv [][2]string) {
 		key := p[0] + strings.Repeat(" ", maxKey-len(p[0]))
 		fmt.Fprintf(w, "  %s  %s\n", ui.Dim(key), p[1])
 	}
+}
+
+// contextLine 渲染当前上下文 Token 的来源说明：真实 usage 给出明细，否则标注为估算。
+func contextLine(s *model.SessionStats) string {
+	if !s.HasRealTokens() {
+		return ui.Dim("~" + ui.FormatTokensFull(s.Tokens) + "  (estimated, no usage data)")
+	}
+	u := s.LastUsage
+	return fmt.Sprintf("%s   real: in %s + cache %s + create %s",
+		ui.Bold(ui.FormatTokensFull(u.ContextTokens)),
+		ui.FormatTokensFull(u.InputTokens),
+		ui.FormatTokensFull(u.CacheRead),
+		ui.FormatTokensFull(u.CacheCreation),
+	)
+}
+
+// etaLine 返回预计填满时间的可读串（基于近期真实增速）。
+func etaLine(s *model.SessionStats, maxContext int64) string {
+	if _, eta, ok := report.EstimateFill(s, maxContext); ok {
+		return ui.FormatDuration(eta) + "  (按近期增速)"
+	}
+	return ui.Dim("—  (样本不足或无增长)")
+}
+
+// activeTag 在"最后活跃"后追加活跃标记。
+func activeTag(s *model.SessionStats) string {
+	if s.IsActive() {
+		return "  " + ui.Color("[活跃]", ui.LevelGreen)
+	}
+	return ""
 }

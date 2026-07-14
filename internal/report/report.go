@@ -5,16 +5,18 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/USER/claude-context-monitor/internal/model"
 )
 
 // SortSessionsByTokens 按 Token 降序排序（返回新切片，不改原切片）。
+// Token 取真实 usage（无则估算）。
 func SortSessionsByTokens(sessions []*model.SessionStats) []*model.SessionStats {
 	out := make([]*model.SessionStats, len(sessions))
 	copy(out, sessions)
 	sort.SliceStable(out, func(i, j int) bool {
-		return out[i].Tokens > out[j].Tokens
+		return out[i].ContextTokens() > out[j].ContextTokens()
 	})
 	return out
 }
@@ -145,9 +147,9 @@ func AggregateProjects(sessions []*model.SessionStats) []*model.ProjectStats {
 			order = append(order, k)
 		}
 		a.p.SessionCount++
-		a.p.TotalTokens += s.Tokens
-		if s.Tokens > a.p.LargestTokens {
-			a.p.LargestTokens = s.Tokens
+		a.p.TotalTokens += s.ContextTokens()
+		if s.ContextTokens() > a.p.LargestTokens {
+			a.p.LargestTokens = s.ContextTokens()
 			a.p.LargestSession = s.SessionID
 		}
 	}
@@ -191,7 +193,7 @@ func FindSession(sessions []*model.SessionStats, query string) (*model.SessionSt
 			return s, true // 精确匹配优先
 		}
 		if strings.HasPrefix(id, q) {
-			if prefixMatch == nil || s.Tokens > prefixMatch.Tokens {
+			if prefixMatch == nil || s.ContextTokens() > prefixMatch.ContextTokens() {
 				prefixMatch = s
 			}
 		}
@@ -199,11 +201,68 @@ func FindSession(sessions []*model.SessionStats, query string) (*model.SessionSt
 	return prefixMatch, false
 }
 
-// TotalTokens 汇总所有 Session 的 Token。
+// TotalTokens 汇总所有 Session 的 Token（真实优先）。
 func TotalTokens(sessions []*model.SessionStats) int64 {
 	var sum int64
 	for _, s := range sessions {
-		sum += s.Tokens
+		sum += s.ContextTokens()
 	}
 	return sum
+}
+
+// GlobalTopMessages 聚合所有会话的 Top 消息，返回全局最大的前 n 条（带来源）。
+// 依赖每个会话已捕获的 TopMessages；n<=0 时默认 20。
+func GlobalTopMessages(sessions []*model.SessionStats, n int) []*model.GlobalMessageStat {
+	if n <= 0 {
+		n = 20
+	}
+	names := ComputeProjectDisplayNames(sessions)
+	var all []*model.GlobalMessageStat
+	for _, s := range sessions {
+		name := DisplayName(names, s)
+		for _, m := range s.TopMessages {
+			all = append(all, &model.GlobalMessageStat{
+				Project:   name,
+				SessionID: s.SessionID,
+				Kind:      m.Kind,
+				Tokens:    m.Tokens,
+				Preview:   m.Preview,
+			})
+		}
+	}
+	sort.SliceStable(all, func(i, j int) bool {
+		return all[i].Tokens > all[j].Tokens
+	})
+	if n < len(all) {
+		all = all[:n]
+	}
+	return all
+}
+
+// EstimateFill 依据近期真实 usage 采样估算上下文增速与预计填满时间。
+// 返回 (增速 token/秒, 距填满时长, 是否可估算)。ok=false 表示样本不足或无增长。
+func EstimateFill(s *model.SessionStats, maxContext int64) (ratePerSec float64, eta time.Duration, ok bool) {
+	n := len(s.Samples)
+	if n < 2 || maxContext <= 0 {
+		return 0, 0, false
+	}
+	start := 0
+	if n > 8 { // 取最近 8 个采样反映"当前"增速
+		start = n - 8
+	}
+	a := s.Samples[start]
+	b := s.Samples[n-1]
+	dt := b.At.Sub(a.At).Seconds()
+	if dt <= 0 {
+		return 0, 0, false
+	}
+	rate := float64(b.Tokens-a.Tokens) / dt
+	if rate <= 0 { // 无增长或正在缩减（如压缩）
+		return rate, 0, false
+	}
+	remaining := float64(maxContext - b.Tokens)
+	if remaining <= 0 {
+		return rate, 0, false // 已满
+	}
+	return rate, time.Duration(remaining / rate * float64(time.Second)), true
 }

@@ -9,8 +9,9 @@ import (
 )
 
 // renderSessionTable 渲染 Session 列表表格（root 与 top 共用）。
-// sessions 应已按需排序。
-func renderSessionTable(cfg *Config, sessions []*model.SessionStats, title string) {
+// sessions 为要显示的（可能已截断的）会话；names 需基于【全部】会话计算，
+// 以保证同名消歧在不同窗口下一致。
+func renderSessionTable(cfg *Config, sessions []*model.SessionStats, names map[string]string, title string) {
 	w := cfg.out()
 	max := cfg.MaxContext
 
@@ -31,14 +32,17 @@ func renderSessionTable(cfg *Config, sessions []*model.SessionStats, title strin
 	if cfg.Limit > 0 && len(rows) > cfg.Limit {
 		rows = rows[:cfg.Limit]
 	}
-	names := report.ComputeProjectDisplayNames(sessions)
 	for _, s := range rows {
 		status, _ := ui.StatusLabel(s.Used())
+		tok := ui.FormatTokensFull(s.ContextTokens())
+		if !s.HasRealTokens() {
+			tok = "~" + tok // 纯估算，无真实 usage
+		}
 		tbl.Rows = append(tbl.Rows, []string{
 			report.DisplayName(names, s),
 			ui.ShortID(s.SessionID, 8),
 			ui.FormatSize(s.FileSize),
-			ui.FormatTokensFull(s.Tokens),
+			tok,
 			ui.FormatPercent(s.Used()),
 			ui.FormatTokensFull(s.Remaining()),
 			status,
