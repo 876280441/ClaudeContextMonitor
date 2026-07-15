@@ -14,6 +14,7 @@
 //	watch [interval]   实时刷新（默认 3s）
 //	serve [addr]       启动 Web 仪表盘（默认 127.0.0.1:8765）
 //	messages [N]       全局最大的前 N 条消息（默认 20）
+//	tray [addr]        系统托盘常驻 + 后台 Web 仪表盘（默认 127.0.0.1:8765）
 //
 // 全局选项：
 //
@@ -85,6 +86,7 @@ func commands() map[string]func(*cmd.Config, []string) error {
 		"watch":    cmd.RunWatch,
 		"serve":    cmd.RunServe,
 		"messages": cmd.RunMessages,
+		"tray":     cmd.RunTray,
 		"help": func(cfg *cmd.Config, _ []string) error {
 			printUsage(cfg.Out)
 			return nil
@@ -199,6 +201,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  watch [interval]      Live refresh (e.g. 3s)")
 	fmt.Fprintln(w, "  serve [addr]          Start web dashboard (default 127.0.0.1:8765)")
 	fmt.Fprintln(w, "  messages [N]          Top N largest messages across all sessions")
+	fmt.Fprintln(w, "  tray [addr]           Resident system tray + background dashboard (Windows)")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Options:")
 	fmt.Fprintln(w, "  --max-context N       Context limit (default 1000000)")

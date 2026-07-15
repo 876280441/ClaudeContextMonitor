@@ -64,6 +64,11 @@ func NewServer(claudeDir string, maxContext int64, includeSidechain bool) *Serve
 // cacheTTL 控制扫描结果缓存有效期，避免一次页面刷新内多请求重复全量扫描。
 const cacheTTL = time.Second
 
+// Scan 返回（带 1s 缓存的）扫描结果，供外部（如托盘）复用，避免重复全量扫描。
+func (s *Server) Scan(maxContext int64, includeSidechain bool) *scanner.Result {
+	return s.scan(maxContext, includeSidechain)
+}
+
 // scan 返回（带 1s 缓存的）扫描结果。
 func (s *Server) scan(maxContext int64, includeSidechain bool) *scanner.Result {
 	key := cacheKey{max: maxContext, isc: includeSidechain}
